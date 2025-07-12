@@ -23,7 +23,6 @@ async def calculate_dimensions(image: BytesIO) -> DimensionsResponse:
         raise ValueError("No se detectaron 4 códigos ArUco")
 
     # Supongamos que los códigos están en las 4 esquinas de un rectángulo
-    # Tomaremos las primeras 4 esquinas detectadas como las que definen la superficie
     corner1 = corners[0][0][0]  # Primera esquina (arriba-izquierda)
     corner2 = corners[1][0][0]  # Segunda esquina (arriba-derecha)
     corner3 = corners[2][0][0]  # Tercera esquina (abajo-izquierda)
