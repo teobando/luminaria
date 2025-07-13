@@ -1,42 +1,53 @@
 import cv2
 import numpy as np
+from fastapi import UploadFile
 from app.model.DimensionsModel import DimensionsResponse
 
-# Diccionario ArUco (versión contrib)
+# Diccionario ArUco (versión contrib) y parámetros de detección
 aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-# Parámetros del detector (nueva forma en OpenCV >=4.7)
-parameters = cv2.aruco.DetectorParameters()
+params = cv2.aruco.DetectorParameters()
+params.adaptiveThreshConstant = 20   # prueba de 0–20
+params.adaptiveThreshWinSizeMin = 3
+params.adaptiveThreshWinSizeMax = 101
+params.adaptiveThreshWinSizeStep = 10
+detector = cv2.aruco.ArucoDetector(aruco_dict, params)
 
-async def calculate_dimensions(image) -> DimensionsResponse:
-    # Leer los bytes de la imagen y convertir a array de NumPy
-    image_data = await image.read()
-    np_image = np.frombuffer(image_data, np.uint8)
-    img = cv2.imdecode(np_image, cv2.IMREAD_COLOR)
-
+async def calculate_dimensions(image: UploadFile) -> DimensionsResponse:
+    # Leer los bytes de la imagen
+    data = await image.read()
+    np_img = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("No se pudo cargar la imagen correctamente")
 
-    # Convertir a escala de grises
+    # Gris y suavizado
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    # Detectar los marcadores ArUco
-    corners, ids, rejected = cv2.aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
+    # Detección de marcadores
+    corners, ids, rejected = detector.detectMarkers(gray)
 
-    # Verificar que haya al menos 4 marcadores
-    if len(corners) < 4:
-        raise ValueError("No se detectaron 4 códigos ArUco")
+    # Visualización de debug
+    vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    vis = cv2.aruco.drawDetectedMarkers(vis, corners, ids)
+    for pts in rejected:
+        pts = pts.reshape(-1, 2).astype(int)
+        cv2.polylines(vis, [pts], True, (0, 0, 255), 2)
+    # Guardar en /mnt/data para poder inspeccionarlo
+    cv2.imwrite("debug_detect.jpg", vis)
 
-    # Tomar las esquinas de los primeros 4 marcadores
-    corner1 = corners[0][0][0]  # arriba-izquierda
-    corner2 = corners[1][0][0]  # arriba-derecha
-    corner3 = corners[2][0][0]  # abajo-izquierda
-    corner4 = corners[3][0][0]  # abajo-derecha
+    # Validación
+    found = 0 if ids is None else len(ids)
+    if found < 4:
+        raise ValueError(f"No se detectaron 4 códigos ArUco (encontrados: {found})")
 
-    # Calcular ancho (distancia entre corner1 y corner2)
-    width = np.linalg.norm(corner2 - corner1)
+    # Calcular ancho y alto con los cuatro primeros marcadores
+    tl = corners[0][0][0]
+    tr = corners[1][0][0]
+    bl = corners[2][0][0]
 
-    # Calcular alto (distancia entre corner1 y corner3)
-    height = np.linalg.norm(corner3 - corner1)
+    width = np.linalg.norm(tr - tl)
+    height = np.linalg.norm(bl - tl)
 
     return DimensionsResponse(
         width=width,
